@@ -11,7 +11,7 @@ ROOT_DIR = "/data/my_PRAG/baseline"
 CHUNK_FILE = os.path.join(ROOT_DIR, "corpus/sampled_chunks_with_doc.jsonl")
 EMBEDDING_FILE = os.path.join(ROOT_DIR, "corpus/sampled_embeddings_with_doc.npy")
 DEVICE = "cuda:0"
-BATCH_SIZE = 32
+BATCH_SIZE = 256
 
 def load_chunks(file_path):
     """JSONL 파일에서 청크 로드"""
