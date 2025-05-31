@@ -103,6 +103,9 @@ CUDA_VISIBLE_DEVICES=0,1 python mydata_main.py --method [METHOD] --persona_index
 - `--output_dir`: 출력 디렉토리 지정
   - 예시: `--output_dir output_1`
 
+- `--persona_task_file`: 사용할 페르소나 데이터셋
+  - 예시: `--persona_task_file final_persona_tasks.json`
+
 ### 선택 파라미터
 - `--device`: 사용할 GPU 디바이스 (기본값: "cuda:0")
   - 예시: `--device cuda:0`
