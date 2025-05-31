@@ -1,0 +1,2 @@
+model_path:
+  emb_model: "facebook/contriever"  # 임베딩 모델 경로 

@@ -14,9 +14,9 @@ import warnings
 warnings.filterwarnings('ignore', category=UserWarning)
 
 # 데이터 로드
-eval_df = pd.read_csv('/data/my_PRAG/baseline/output2/evaluation_report.csv')
-gen_df = pd.read_csv('/data/my_PRAG/baseline/output2/generation_report.csv')
-idx_df = pd.read_csv('/data/my_PRAG/baseline/output2/indexing_report.csv')
+eval_df = pd.read_csv('/data/my_PRAG/baseline/output_wdoc/evaluation_report.csv')
+gen_df = pd.read_csv('/data/my_PRAG/baseline/output_wdoc/generation_report.csv')
+idx_df = pd.read_csv('/data/my_PRAG/baseline/output_wdoc/indexing_report.csv')
 
 # 1. 성능 지표 분석
 def analyze_performance():

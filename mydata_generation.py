@@ -14,7 +14,10 @@ class MyDataGeneration(MyDataUtils):
             mode=utils.mode,
             method=utils.method,
             device=utils.device,
-            use_multi_gpu=utils.use_multi_gpu
+            use_multi_gpu=utils.use_multi_gpu,
+            chunk_mode=utils.chunk_mode,
+            output_dir=utils.output_dir,
+            persona_task_file=utils.persona_task_file
         )
     
     def process_query(self, query, preference_text, filtered_chunks, index, generation_prompt):
@@ -55,7 +58,7 @@ class MyDataGeneration(MyDataUtils):
         print(f"\n=== Starting generation for persona {persona_index} with method {self.method} ===")
         
         # 출력 디렉토리 설정
-        if self.method == "standard":
+        if self.method in ["standard", "random"]:
             method_dir = os.path.join(self.output_dir, f"{self.method}")
         else:
             method_dir = os.path.join(self.output_dir, f"{self.method}/{persona_index}")

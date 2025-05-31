@@ -26,7 +26,6 @@ except RuntimeError:
 
 # 공통 설정
 ROOT_DIR = "/data/my_PRAG/baseline"
-PERSONA_TASK_FILE = os.path.join(ROOT_DIR, "final_persona_tasks.json")
 MODEL_NAME = "meta-llama/Llama-3.1-8B-Instruct"
 VLLM_SERVER_URL = "http://localhost:8006/v1"
 TOP_K = 5
@@ -63,12 +62,24 @@ class MyDataUtils:
     _seed = 42
     set_global_seed(_seed)
     
-    def __init__(self, mode="all", method="all", device="cuda:0", use_multi_gpu=False, chunk_mode="wodoc", output_dir=None):
+    def __init__(self, mode, method, device, use_multi_gpu, chunk_mode, output_dir, persona_task_file=None):
+        """
+        MyData 유틸리티 클래스 초기화
+        
+        Args:
+            mode (str): 실행 모드 ('standard' 또는 'persona')
+            method (str): 사용할 방법 ('standard', 'naive_p', 'cosine_only', 'random', 'hipporag')
+            device (str): 사용할 디바이스 ('cuda' 또는 'cpu')
+            use_multi_gpu (bool): 멀티 GPU 사용 여부
+            chunk_mode (str): 청크 모드 ('wdoc' 또는 'wodoc')
+            output_dir (str): 출력 디렉토리 경로
+            persona_task_file (str, optional): persona task 파일 경로
+        """
         self.mode = mode
         self.method = method
         self.device = device
         self.use_multi_gpu = use_multi_gpu
-        
+        self.chunk_mode = chunk_mode
         # chunk_mode에 따른 파일 경로 설정
         if chunk_mode == "wodoc":
             self.chunk_file = os.path.join(ROOT_DIR, "corpus/sampled_chunks.jsonl")
@@ -79,6 +90,7 @@ class MyDataUtils:
         else:
             raise ValueError(f"Invalid chunk_mode: {chunk_mode}. Must be either 'wodoc' or 'wdoc'")
         
+        self.persona_task_file = os.path.join(ROOT_DIR, persona_task_file)
         self.output_dir = os.path.join(ROOT_DIR, output_dir)
         self.contriever_tokenizer = None
         self.contriever_model = None
@@ -311,7 +323,7 @@ class MyDataUtils:
         return preference, answer
     
     def load_persona_data(self, persona_index):
-        with open(PERSONA_TASK_FILE, "r", encoding="utf-8") as f:
+        with open(self.persona_task_file, "r", encoding="utf-8") as f:
             personas = json.load(f)
         return next(p for p in personas if p["persona_index"] == persona_index)
 

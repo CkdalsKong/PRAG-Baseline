@@ -10,7 +10,10 @@ class MyDataEvaluation(MyDataUtils):
             mode=utils.mode,
             method=utils.method,
             device=utils.device,
-            use_multi_gpu=utils.use_multi_gpu
+            use_multi_gpu=utils.use_multi_gpu,
+            chunk_mode=utils.chunk_mode,
+            output_dir=utils.output_dir,
+            persona_task_file=utils.persona_task_file
         )
     
     def process_metric(self, task, metric, eval_message_text, system_prompt):
