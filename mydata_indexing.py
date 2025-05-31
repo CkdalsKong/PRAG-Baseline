@@ -8,6 +8,7 @@ from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from mydata_utils import MyDataUtils, PROMPT_LLM_FILTERING, PROMPT_LLM_SUMMARIZING, INDEXING_REPORT_FILE, THRESHOLD
 # from HippoRAG import HippoRAG
+
 import random
 
 class MyDataIndexing(MyDataUtils):
@@ -19,8 +20,16 @@ class MyDataIndexing(MyDataUtils):
             use_multi_gpu=utils.use_multi_gpu,
             chunk_mode=utils.chunk_mode,
             output_dir=utils.output_dir,
-            persona_task_file=utils.persona_task_file
+            persona_task_file=utils.persona_task_file,
+            emb_model_name=utils.emb_model_name
         )
+        
+        # 모델 로드
+        self.tokenizer, self.model = self.utils.load_models()
+        
+        # 임베딩 파일 경로 설정
+        self.embeddings_file = os.path.join(self.output_dir, f"embeddings_{self.emb_model_name.replace('/', '_')}.npy")
+        self.index_file = os.path.join(self.output_dir, f"index_{self.emb_model_name.replace('/', '_')}.faiss")
     
     def run_indexing(self, persona_index):
         if persona_index == -1:
@@ -236,8 +245,8 @@ class MyDataIndexing(MyDataUtils):
             
             # 결과 저장
             print("Saving results...")
-            faiss.write_index(index, os.path.join(method_dir, "faiss.index"))
-            np.save(os.path.join(method_dir, "embeddings.npy"), embeddings)
+            faiss.write_index(index, self.index_file)
+            np.save(self.embeddings_file, embeddings)
             self.save_jsonl(os.path.join(method_dir, "kept.jsonl"), [{"text": chunk} for chunk in merged_chunks])
             
             faiss_time = time.time() - start_faiss

@@ -8,7 +8,7 @@ from mydata_generation import MyDataGeneration
 from mydata_evaluation import MyDataEvaluation
 
 class MyDataMain:
-    def __init__(self, mode="all", method="all", device="cuda:0", use_multi_gpu=False, chunk_mode="wodoc", output_dir=None, persona_task_file=None):
+    def __init__(self, mode="all", method="all", device="cuda:0", use_multi_gpu=False, chunk_mode="wodoc", output_dir=None, persona_task_file=None, emb_model_name="facebook/contriever"):
         self.mode = mode
         self.method = method
         self.device = device
@@ -16,6 +16,7 @@ class MyDataMain:
         self.chunk_mode = chunk_mode
         self.output_dir = output_dir
         self.persona_task_file = persona_task_file
+        self.emb_model_name = emb_model_name
         
         # 유틸리티 클래스 초기화
         self.utils = MyDataUtils(
@@ -25,7 +26,8 @@ class MyDataMain:
             use_multi_gpu=use_multi_gpu,
             chunk_mode=chunk_mode,
             output_dir=output_dir,
-            persona_task_file=persona_task_file
+            persona_task_file=persona_task_file,
+            emb_model_name=emb_model_name
         )
         
         # 각 단계별 처리 클래스 초기화
@@ -91,6 +93,7 @@ def main():
     parser.add_argument("--chunk_mode", type=str, required=True, choices=["wodoc", "wdoc"], help="Chunk mode: 'wodoc' for chunks without document info, 'wdoc' for chunks with document info")
     parser.add_argument("--output_dir", type=str, required=True, help="Path to the output folder")
     parser.add_argument("--persona_task_file", type=str, required=True, help="Path to the persona task file")
+    parser.add_argument("--emb_model_name", type=str, default="facebook/contriever", help="임베딩 모델 이름")
     args = parser.parse_args()
     
     # Persona 인덱스 설정
@@ -114,7 +117,8 @@ def main():
             use_multi_gpu=args.use_multi_gpu,
             chunk_mode=args.chunk_mode,
             output_dir=args.output_dir,
-            persona_task_file=args.persona_task_file
+            persona_task_file=args.persona_task_file,
+            emb_model_name=args.emb_model_name
         )
         
         # 각 persona에 대해 실행

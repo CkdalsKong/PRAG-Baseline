@@ -13,9 +13,19 @@ class MyDataEvaluation(MyDataUtils):
             use_multi_gpu=utils.use_multi_gpu,
             chunk_mode=utils.chunk_mode,
             output_dir=utils.output_dir,
-            persona_task_file=utils.persona_task_file
+            persona_task_file=utils.persona_task_file,
+            emb_model_name=utils.emb_model_name
         )
-    
+        
+        self.emb_model_name = utils.emb_model_name
+        
+        # 모델 로드
+        self.tokenizer, self.model = self.utils.load_models()
+        
+        # 임베딩 파일 경로 설정
+        self.embeddings_file = os.path.join(self.output_dir, f"embeddings_{self.emb_model_name.replace('/', '_')}.npy")
+        self.index_file = os.path.join(self.output_dir, f"index_{self.emb_model_name.replace('/', '_')}.faiss")
+
     def process_metric(self, task, metric, eval_message_text, system_prompt):
         preference = task["preference"]
         question = task["question"]

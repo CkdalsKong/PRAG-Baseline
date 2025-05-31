@@ -62,7 +62,7 @@ class MyDataUtils:
     _seed = 42
     set_global_seed(_seed)
     
-    def __init__(self, mode, method, device, use_multi_gpu, chunk_mode, output_dir, persona_task_file=None):
+    def __init__(self, mode, method, device, use_multi_gpu, chunk_mode, output_dir, persona_task_file=None, emb_model_name="facebook/contriever"):
         """
         MyData 유틸리티 클래스 초기화
         
@@ -74,19 +74,24 @@ class MyDataUtils:
             chunk_mode (str): 청크 모드 ('wdoc' 또는 'wodoc')
             output_dir (str): 출력 디렉토리 경로
             persona_task_file (str, optional): persona task 파일 경로
+            emb_model_name (str): 임베딩 모델 이름
         """
         self.mode = mode
         self.method = method
         self.device = device
         self.use_multi_gpu = use_multi_gpu
         self.chunk_mode = chunk_mode
+        self.emb_model_name = emb_model_name
+        
         # chunk_mode에 따른 파일 경로 설정
         if chunk_mode == "wodoc":
             self.chunk_file = os.path.join(ROOT_DIR, "corpus/sampled_chunks.jsonl")
-            self.embedding_file = os.path.join(ROOT_DIR, "corpus/sampled_embeddings.npy")
+            model_name_clean = emb_model_name.replace("/", "_")
+            self.embedding_file = os.path.join(ROOT_DIR, f"corpus/sampled_embeddings_{model_name_clean}.npy")
         elif chunk_mode == "wdoc":
             self.chunk_file = os.path.join(ROOT_DIR, "corpus/sampled_chunks_with_doc.jsonl")
-            self.embedding_file = os.path.join(ROOT_DIR, "corpus/sampled_embeddings_with_doc.npy")
+            model_name_clean = emb_model_name.replace("/", "_")
+            self.embedding_file = os.path.join(ROOT_DIR, f"corpus/sampled_embeddings_with_doc_{model_name_clean}.npy")
         else:
             raise ValueError(f"Invalid chunk_mode: {chunk_mode}. Must be either 'wodoc' or 'wdoc'")
         
@@ -130,10 +135,10 @@ class MyDataUtils:
     
     def load_models(self):
         """모델과 토크나이저 로드"""
-        # Contriever 모델 로드
-        print("Loading Contriever model...")
-        self.contriever_tokenizer = AutoTokenizer.from_pretrained("facebook/contriever")
-        self.contriever_model = AutoModel.from_pretrained("facebook/contriever").eval()
+        # 임베딩 모델 로드
+        print(f"Loading {self.emb_model_name} model...")
+        self.contriever_tokenizer = AutoTokenizer.from_pretrained(self.emb_model_name)
+        self.contriever_model = AutoModel.from_pretrained(self.emb_model_name).eval()
         
         if self.use_multi_gpu and torch.cuda.device_count() > 1:
             print(f"Using {self.num_gpus} GPUs with batch size {self.batch_size}!")
@@ -146,10 +151,10 @@ class MyDataUtils:
                 output_device=0,  # 메인 GPU
                 dim=0  # 배치 차원
             )
-            print(f"Contriever model distributed across {self.num_gpus} GPUs")
+            print(f"Embedding model distributed across {self.num_gpus} GPUs")
         else:
             self.contriever_model = self.contriever_model.to(self.device)
-            print(f"Contriever model loaded on {self.device}")
+            print(f"Embedding model loaded on {self.device}")
         
         # LLM 모델 로드 (필요한 경우)
         if self.method in ["naive_p"] and self.mode in [""]:
