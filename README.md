@@ -106,6 +106,9 @@ CUDA_VISIBLE_DEVICES=0,1 python mydata_main.py --method [METHOD] --persona_index
 - `--persona_task_file`: 사용할 페르소나 데이터셋
   - 예시: `--persona_task_file final_persona_tasks.json`
 
+- `--emb_model_name`: 사용할 임베딩 모델
+  - 예시: `--emb_model_name facebook/contriever`
+
 ### 선택 파라미터
 - `--device`: 사용할 GPU 디바이스 (기본값: "cuda:0")
   - 예시: `--device cuda:0`

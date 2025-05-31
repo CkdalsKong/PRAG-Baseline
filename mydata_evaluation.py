@@ -16,11 +16,8 @@ class MyDataEvaluation(MyDataUtils):
             persona_task_file=utils.persona_task_file,
             emb_model_name=utils.emb_model_name
         )
-        
+        self.utils = utils
         self.emb_model_name = utils.emb_model_name
-        
-        # 모델 로드
-        self.tokenizer, self.model = self.utils.load_models()
         
         # 임베딩 파일 경로 설정
         self.embeddings_file = os.path.join(self.output_dir, f"embeddings_{self.emb_model_name.replace('/', '_')}.npy")
