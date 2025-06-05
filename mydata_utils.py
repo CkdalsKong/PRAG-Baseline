@@ -1,4 +1,5 @@
 import os
+import re
 import csv
 import time
 import json
@@ -423,4 +424,37 @@ class MyDataUtils:
             "original": original_chunk,
             "summarized": summarized_text,
             "reason": reason
+        }
+    def extract_likes_dislikes(self, preference):
+        prompt = f"""
+Given the following preference statement, extract the likes and dislikes in a structured format.
+
+Preference: {preference}
+
+Please respond in the following format:
+<likes>
+List of things the person likes or prefers
+</likes>
+<dislikes>
+List of things the person dislikes or prefers less
+</dislikes>
+
+Note:
+- If the preference uses "more interested in X than Y", X goes in likes and Y in dislikes
+- If the preference uses "less interested in X than Y", X goes in dislikes and Y in likes
+- Be specific and concise in your extraction
+"""
+        # LLM 호출 및 결과 파싱
+        response = self.generate_message_vllm(
+                messages=[{"role": "user", "content": prompt}],
+                system_prompt="You are a helpful assistant tasked with extracting likes and dislikes from preference statements."
+            )
+
+        # 결과 파싱
+        likes = re.search(r"<likes>(.*?)</likes>", response, re.DOTALL)
+        dislikes = re.search(r"<dislikes>(.*?)</dislikes>", response, re.DOTALL)
+        
+        return {
+            "likes": likes.group(1).strip() if likes else "",
+            "dislikes": dislikes.group(1).strip() if dislikes else ""
         }

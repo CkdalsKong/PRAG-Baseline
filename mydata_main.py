@@ -51,7 +51,7 @@ class MyDataMain:
         # 1. Indexing
         if self.mode in ["indexing", "all"]:
             print("\n1. Starting indexing...")
-            faiss_index_path = os.path.join(method_dir, "faiss.index")
+            faiss_index_path = os.path.join(method_dir, f"index_{self.emb_model_name.replace('/', '_')}.faiss")
             if os.path.exists(faiss_index_path):
                 print(f"✅ Indexing already completed. Skipping...")
             else:
@@ -85,7 +85,7 @@ class MyDataMain:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--method", type=str, required=True, choices=["naive_p", "standard", "cosine_only", "random", "hipporag", "all"], help="Method type: 'naive_p', 'standard', 'cosine_only', or 'all'")
+    parser.add_argument("--method", type=str, required=True, choices=["naive_p", "standard", "cosine_only", "random", "hipporag", "pref_cluster_filter", "all"], help="Method type: 'naive_p', 'standard', 'cosine_only', or 'all'")
     parser.add_argument("--persona_index", type=str, required=True, help="Persona index (0-10) or 'all'")
     parser.add_argument("--device", type=str, default="cuda:0", help="Device to use (e.g., cuda:0)")
     parser.add_argument("--mode", type=str, required=True, choices=["indexing", "generation", "evaluation", "all"], help="Mode to run: 'indexing', 'generation', 'evaluation', or 'all'")
@@ -103,7 +103,7 @@ def main():
         indices = list(range(20)) if args.persona_index == "all" else [int(args.persona_index)]
     
     # 실행할 방법들 설정
-    methods = ["naive_p", "standard", "cosine_only", "random", "hipporag"] if args.method == "all" else [args.method]
+    methods = ["naive_p", "standard", "cosine_only", "random", "pref_cluster_filter"] if args.method == "all" else [args.method]
     
     # 각 방법에 대해 실행
     for method in methods:

@@ -6,7 +6,8 @@ import torch
 import numpy as np
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from mydata_utils import MyDataUtils, PROMPT_GENERATION, GENERATION_REPORT_FILE
+from mydata_utils import MyDataUtils, PROMPT_GENERATION, GENERATION_REPORT_FILE, TOP_K
+from concurrent.futures import ProcessPoolExecutor
 
 class MyDataGeneration(MyDataUtils):
     def __init__(self, utils):
@@ -21,20 +22,58 @@ class MyDataGeneration(MyDataUtils):
             emb_model_name=utils.emb_model_name
         )
         self.utils = utils
-        
-        # 임베딩 파일 경로 설정
-        self.embeddings_file = os.path.join(self.output_dir, f"embeddings_{self.emb_model_name.replace('/', '_')}.npy")
-        self.index_file = os.path.join(self.output_dir, f"index_{self.emb_model_name.replace('/', '_')}.faiss")
 
-    def process_query(self, query, preference_text, filtered_chunks, index, generation_prompt):
+    def process_query(self, query, preference_text, filtered_chunks, index_file, method_dir, generation_prompt):
         question = query["question"]
+        # Index 로드
+        index = faiss.read_index(index_file)
         
-        # 관련 청크 검색
-        retrieved, retrieval_time = self.retrieve_top_k(
-            question,
-            index,
-            filtered_chunks
-        )
+        if self.method == "pref_cluster_filter":
+            # 1. 클러스터 정보 로드
+            cluster_info_file = os.path.join(method_dir, "cluster_info.json")
+            with open(cluster_info_file, 'r') as f:
+                cluster_info = json.load(f)
+            
+            # 2. 쿼리 임베딩 생성
+            query_emb = self.embed_query(question)
+            query_emb = query_emb / np.linalg.norm(query_emb)
+            
+            start_retrieval = time.time()
+
+            # 3. 쿼리와 각 호의 유사도 계산
+            likes = cluster_info["likes"]
+            like_embeddings = self.embed_texts(likes)
+            like_embeddings = like_embeddings / np.linalg.norm(like_embeddings, axis=1, keepdims=True)
+            
+            # 쿼리 임베딩을 2차원으로 확장
+            query_emb_2d = query_emb.reshape(1, -1)  # shape: (1, embedding_dim)
+
+            # 명시적으로 행렬 곱셈 수행
+            similarities = np.dot(like_embeddings, query_emb_2d.T).flatten()  # shape: (5,)
+            best_cluster_idx = np.argmax(similarities)
+            
+            # 4. 선택된 클러스터의 청크들 중에서 쿼리와 가장 유사한 상위 K개 선택
+            cluster_chunks = cluster_info["cluster_chunks"][best_cluster_idx]
+            
+            # 클러스터의 청크들에 대한 임베딩 생성
+            cluster_chunk_embeddings = self.embed_texts(cluster_chunks)
+            cluster_chunk_embeddings = cluster_chunk_embeddings / np.linalg.norm(cluster_chunk_embeddings, axis=1, keepdims=True)
+            
+            # 쿼리와 청크들 간의 유사도 계산
+            chunk_similarities = np.dot(cluster_chunk_embeddings, query_emb_2d.T).flatten()  # shape: (n_chunks,)
+            
+            # 상위 K개 청크 선택
+            top_k_indices = np.argsort(chunk_similarities)[-TOP_K:]
+            retrieved = [cluster_chunks[i] for i in top_k_indices]
+            retrieval_time = time.time() - start_retrieval
+        
+        else:
+            # 기존 방식대로 처리
+            retrieved, retrieval_time = self.retrieve_top_k(
+                question,
+                index,
+                filtered_chunks
+            )
         
         context = "\n".join([f"Document {i+1}: {doc}" for i, doc in enumerate(retrieved)])
 
@@ -62,7 +101,9 @@ class MyDataGeneration(MyDataUtils):
 
     def run_generation(self, persona_index, method_dir):
         print(f"\n=== Starting generation for persona {persona_index} with method {self.method} ===")
-        
+
+        index_file = os.path.join(method_dir, f"index_{self.emb_model_name.replace('/', '_')}.faiss")
+
         # 출력 디렉토리 설정
         if self.method in ["standard", "random"]:
             method_dir = os.path.join(self.output_dir, f"{self.method}")
@@ -82,41 +123,39 @@ class MyDataGeneration(MyDataUtils):
         
         # Prompt 로드
         generation_prompt = self.load_prompt_template(PROMPT_GENERATION)
-        
-        # Index 로드
-        index = faiss.read_index(os.path.join(method_dir, "faiss.index"))
 
         # Model 로드
         self.load_models()
 
         all_results = []
         retrieval_times = []
-        with ThreadPoolExecutor() as executor:
-            futures = []
+        
+        # 각 preference block에 대해 처리
+        for block in persona["preference_blocks"]:
+            preference_text = block["preference"]
+            queries = block["queries"]
             
-            # 각 preference block에 대해 처리
-            for block in persona["preference_blocks"]:
-                preference_text = block["preference"]
-                queries = block["queries"]
-                
-                # 각 쿼리에 대해 future 생성
+            # 각 쿼리에 대해 ProcessPoolExecutor로 처리
+            with ProcessPoolExecutor(max_workers=2) as executor:  # GPU 개수만큼 worker 설정
+                futures = []
                 for query in queries:
                     future = executor.submit(
                         self.process_query,
                         query,
                         preference_text,
                         filtered_chunks,
-                        index,
+                        index_file,  # 인덱스 파일 경로 전달
+                        method_dir,
                         generation_prompt
                     )
                     futures.append(future)
-            
-            # 결과 수집
-            for future in tqdm(as_completed(futures), total=len(futures), desc="Generating responses"):
-                result = future.result()
-                if result:
-                    all_results.append(result)
-                    retrieval_times.append(result["retrieval_time"])
+                
+                # 결과 수집
+                for future in tqdm(as_completed(futures), total=len(futures), desc=f"Processing queries for preference: {preference_text[:50]}..."):
+                    result = future.result()
+                    if result:
+                        all_results.append(result)
+                        retrieval_times.append(result["retrieval_time"])
         
         # 결과 저장
         output_file = os.path.join(method_dir, f"gen_{self.method}_{persona_index}.json")
