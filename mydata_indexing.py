@@ -45,7 +45,7 @@ class MyDataIndexing(MyDataUtils):
         print(f"Output directory: {method_dir}")
         
         # 데이터 로드
-        if self.method in ["naive_p", "cosine_only", "pref_cluster_filter"]:
+        if self.method in ["naive_p", "cosine_only", "pref_cluster_filter", "score_p", "naive_p_all"]:
             persona = self.load_persona_data(persona_index)
             print(f"Loaded persona data for index {persona_index}")
         
@@ -59,7 +59,7 @@ class MyDataIndexing(MyDataUtils):
         print(f"Loaded {len(chunks)} chunks and their embeddings")
         
         # Preference embeddings 생성 또는 로드
-        if self.method in ["naive_p", "cosine_only", "pref_cluster_filter"]:
+        if self.method in ["naive_p", "cosine_only", "pref_cluster_filter", "score_p", "naive_p_all"]:
             print("Loading or generating preference embeddings...")
             preference_list = [block["preference"] for block in persona["preference_blocks"]]
             preference_emb_file = os.path.join(method_dir, "preference_embeddings.npy")
@@ -74,6 +74,22 @@ class MyDataIndexing(MyDataUtils):
                 np.save(preference_emb_file, preference_embeddings)
                 print(f"Saved preference embeddings to {preference_emb_file}")
             
+            # Preference 선호/불호 분리
+            if self.method in ["score_p", "pref_cluster_filter"]:
+                processed_preferences = []
+                for preference in preference_list:
+                    likes_dislikes = self.extract_likes_dislikes(preference)
+                    processed_preferences.append({
+                        "likes": likes_dislikes["likes"],
+                        "dislikes": likes_dislikes["dislikes"],
+                        "original_preference": preference
+                    })
+                
+                # 선호/불호 분리 정보 저장
+                pref_info_file = os.path.join(method_dir, "preference_info.jsonl")
+                self.save_jsonl(pref_info_file, processed_preferences)
+                print(f"✅ Preference info saved to {pref_info_file}")
+
             chunk_embeddings_norm = chunk_embeddings / np.linalg.norm(chunk_embeddings, axis=1, keepdims=True)
             print(f"Using {len(preference_list)} preference embeddings")
         
@@ -105,7 +121,7 @@ class MyDataIndexing(MyDataUtils):
             
             filter_time = time.time() - start_total
             print(f"Cosine filtering completed. Kept {len(kept_chunks)} chunks out of {len(chunks)}")
-            
+        
         elif self.method == "random":
             print("\nStarting random filtering...")
             # 전체 청크에서 10% 랜덤 샘플링
@@ -121,14 +137,79 @@ class MyDataIndexing(MyDataUtils):
             
             filter_time = time.time() - start_total
             print(f"Random sampling completed. Kept {len(kept_chunks)} chunks out of {len(chunks)}")
-        # elif self.method == "hipporag":
-        #     print("\nStarting HippoRAG indexing...")
-        #     hipporag = HippoRAG(device=self.device, use_multi_gpu=self.use_multi_gpu)
-        #     hipporag.load_model()
-        #     filter_time = hipporag.index(chunks, method_dir)
-        #     kept_chunks = chunks  # HippoRAG는 모든 청크를 사용
-        #     kept_save = [{"chunk": chunk} for chunk in chunks]
-        #     filtered_save = []
+            
+        elif self.method == "score_p":
+            print("\nStarting score filtering...")
+            kept_save, kept_chunks, filtered_save = [], [], []
+            keep_indices = []
+            
+            # 선호와 불호 임베딩 분리
+            like_texts = [p["likes"] for p in processed_preferences]
+            dislike_texts = [p["dislikes"] for p in processed_preferences]
+            
+            # 임베딩 생성
+            like_embeddings = self.embed_texts(like_texts)
+            dislike_embeddings = self.embed_texts(dislike_texts)
+            
+            # 임베딩 정규화
+            like_embeddings = like_embeddings / np.linalg.norm(like_embeddings, axis=1, keepdims=True)
+            dislike_embeddings = dislike_embeddings / np.linalg.norm(dislike_embeddings, axis=1, keepdims=True)
+            
+            # 가중치 설정 (선호와 불호의 중요도 조절)
+            alpha = 1.2  # 선호 가중치 (증가)
+            beta = 1.0   # 불호 가중치
+            epsilon = 1e-6  # 0으로 나누기 방지
+            
+            # THRESHOLD 설정
+            # 스코어 범위: [-2.2, 2.2] (alpha=1.5, beta=1.0 기준)
+            # 0.3: 보수적인 필터링 (선호가 불호보다 확실히 높은 경우만 선택)
+            # 0.0: 중간 정도의 필터링 (선호가 불호보다 약간 높은 경우도 선택)
+            # -0.2: 관대한 필터링 (불호가 선호보다 약간 높은 경우도 선택)
+            THRESHOLD = 0.4
+            LIKE_THRESHOLD = 0.7  # 선호 유사도 최소 임계값
+            
+            # 배치 단위로 처리
+            batch_size = self.batch_size
+            for i in tqdm(range(0, len(chunk_embeddings_norm), batch_size), desc=f"Filtering persona {persona_index}"):
+                batch_embeddings = chunk_embeddings_norm[i:i + batch_size]
+                batch_chunks = chunks[i:i + batch_size]
+                
+                # 선호와 불호에 대한 유사도 계산
+                like_sims = np.dot(like_embeddings, batch_embeddings.T)
+                dislike_sims = np.dot(dislike_embeddings, batch_embeddings.T)
+                
+                # 각 선호/불호 페어별로 스코어 계산
+                pair_scores = []
+                for like_sim, dislike_sim in zip(like_sims, dislike_sims):
+                    # 선호 유사도가 임계값을 넘는 경우만 고려
+                    if np.any(like_sim > LIKE_THRESHOLD):
+                        # 선호-불호 차이로 스코어 계산
+                        pair_score = alpha * np.max(like_sim) - beta * np.max(dislike_sim)
+                    else:
+                        pair_score = 0
+                    pair_scores.append(pair_score)
+                
+                # 최종 스코어
+                pair_scores = np.array(pair_scores)  # 리스트를 numpy 배열로 변환
+                scores = np.max(pair_scores, axis=0)  # 각 문서별 최대 스코어
+                
+                # 스코어가 임계값보다 큰 경우만 유지
+                if np.isscalar(scores):
+                    mask = [scores > THRESHOLD] * len(batch_chunks)
+                else:
+                    mask = scores > THRESHOLD
+                
+                # 결과 분류
+                for j, (chunk, is_kept) in enumerate(zip(batch_chunks, mask)):
+                    if is_kept:
+                        kept_chunks.append(chunk)
+                        kept_save.append({"chunk": chunk})
+                    else:
+                        filtered_save.append({"chunk": chunk})
+            
+            filter_time = time.time() - start_total
+            print(f"Score-based filtering completed. Kept {len(kept_chunks)} chunks out of {len(chunks)}")
+     
         else:  # standard 방식
             filter_time = 0
             kept_chunks = chunks
@@ -139,17 +220,8 @@ class MyDataIndexing(MyDataUtils):
             print("\nStarting preference-based clustering and filtering...")
             cluster_chunks = []
             
-            # 1. 선호도에서 호/불호 추출
-            processed_preferences = []
-            for block in persona["preference_blocks"]:
-                preference = block["preference"]
-                likes_dislikes = self.extract_likes_dislikes(preference)
-                processed_preferences.append({
-                    "likes": likes_dislikes["likes"],
-                    "dislikes": likes_dislikes["dislikes"],
-                    "original_preference": preference
-                })
             start_clustering = time.time()
+            
             # 2. 불호에 대한 필터링
             all_dislikes = [p["dislikes"] for p in processed_preferences]
             dislike_embeddings = self.embed_texts(all_dislikes)
@@ -160,7 +232,6 @@ class MyDataIndexing(MyDataUtils):
             filtered_indices = []
             removed_by_dislike = 0  # 불호에 의해 제거된 청크 수
             
-
             # 원본 청크의 임베딩 선택
             chunk_to_idx = {chunk: idx for idx, chunk in enumerate(chunks)}
             kept_indices = [chunk_to_idx[chunk] for chunk in kept_chunks]
@@ -221,7 +292,7 @@ class MyDataIndexing(MyDataUtils):
             cluster_filter_time = time.time() - start_clustering
 
         # LLM 필터링 (naive_p 방식)
-        if self.method in ["naive_p"]:
+        if self.method in ["naive_p", "score_p", "naive_p_all"]:
             print("\nStarting LLM filtering...")
             # Prompt 로드
             filtering_prompt = self.load_prompt_template(PROMPT_LLM_FILTERING)
@@ -259,30 +330,26 @@ class MyDataIndexing(MyDataUtils):
             llm_time = time.time() - start_llm
             print(f"LLM filtering completed. Filtered: {len(filtered)}, Summarized: {len(summarized)}, Kept: {len(kept)}")
             
-            # Summarization (naive_p 방식만)
-            if self.method == "naive_p":
-                summarized_file = os.path.join(method_dir, "summarized.jsonl")
-                print("\nStarting summarization...")
-                start_summary = time.time()
-                summarized_final = []
-                with ThreadPoolExecutor() as executor:  
-                    futures = [executor.submit(self.summarize_single, entry, summarizing_prompt) for entry in summarized]
-                    for future in tqdm(as_completed(futures), total=len(futures), desc="Summarizing chunks"):
-                        try:
-                            result = future.result()
-                            summarized_final.append(result)
-                        except Exception as e:
-                            print(f"Summarization failed: {e}")
-                summary_time = time.time() - start_summary
-                self.save_jsonl(summarized_file, summarized_final)
-                print(f"Summarization completed. Summarized {len(summarized_final)} chunks")
-                print(f"✅ Summary info saved to {summarized_file}")
-                
-                # 최종 청크 병합 (요약된 텍스트만 사용)
-                merged_chunks = [item["summarized"] for item in summarized_final] + [item["chunk"] for item in kept]
-            else:
-                merged_chunks = [item["chunk"] for item in kept]
-                summary_time = 0
+            # Summarization
+            summarized_file = os.path.join(method_dir, "summarized.jsonl")
+            print("\nStarting summarization...")
+            start_summary = time.time()
+            summarized_final = []
+            with ThreadPoolExecutor() as executor:  
+                futures = [executor.submit(self.summarize_single, entry, summarizing_prompt) for entry in summarized]
+                for future in tqdm(as_completed(futures), total=len(futures), desc="Summarizing chunks"):
+                    try:
+                        result = future.result()
+                        summarized_final.append(result)
+                    except Exception as e:
+                        print(f"Summarization failed: {e}")
+            summary_time = time.time() - start_summary
+            self.save_jsonl(summarized_file, summarized_final)
+            print(f"Summarization completed. Summarized {len(summarized_final)} chunks")
+            print(f"✅ Summary info saved to {summarized_file}")
+            
+            # 최종 청크 병합 (요약된 텍스트만 사용)
+            merged_chunks = [item["summarized"] for item in summarized_final] + [item["chunk"] for item in kept]
         else:
             merged_chunks = kept_chunks
             llm_time = 0
@@ -295,7 +362,7 @@ class MyDataIndexing(MyDataUtils):
             
             # 임베딩 생성
             print("Generating embeddings...")
-            if self.method == "naive_p":
+            if self.method in ["naive_p", "score_p", "naive_p_all"]:
                 # 요약된 텍스트와 원본 텍스트를 구분하여 처리
                 original_chunks = [item["chunk"] for item in kept]
                 summarized_chunks = [item["summarized"] for item in summarized_final]
@@ -360,14 +427,14 @@ class MyDataIndexing(MyDataUtils):
         fieldnames = ["method", "persona_index", "cosine_kept", "random_kept", "cluster_kept", "llm_filtered", "summarized", "kept", "cosine_filter_time(s)", "random_filter_time(s)", "cluster_filter_time(s)", "llm_time(s)", "summary_time(s)", "faiss_time(s)", "total_time(s)"]
         row = {
             "method": self.method,
-            "persona_index": f"{persona_index}" if self.method in ["naive_p", "cosine_only", "pref_cluster_filter"] else "all",
-            "cosine_kept": len(kept_chunks) if self.method in ["naive_p", "cosine_only", "pref_cluster_filter"] else 0,
+            "persona_index": f"{persona_index}" if self.method in ["naive_p", "cosine_only", "pref_cluster_filter", "score_p"] else "all",
+            "cosine_kept": len(kept_chunks) if self.method in ["naive_p", "cosine_only", "pref_cluster_filter", "score_p"] else 0,
             "random_kept": len(kept_chunks) if self.method == "random" else 0,
             "cluster_kept": sum(len(chunks) for chunks in cluster_chunks) if self.method == "pref_cluster_filter" else 0,
-            "llm_filtered": len(filtered) if self.method == "naive_p" else 0,
-            "summarized": len(summarized) if self.method == "naive_p" else 0,
-            "kept": len(kept) if self.method == "naive_p" else 0,
-            "cosine_filter_time(s)": f"{filter_time:.2f}" if self.method in ["naive_p", "cosine_only", "pref_cluster_filter"] else "0",
+            "llm_filtered": len(filtered) if self.method in ["naive_p", "score_p"] else 0,
+            "summarized": len(summarized) if self.method in ["naive_p", "score_p"] else 0,
+            "kept": len(kept) if self.method in ["naive_p", "score_p"] else 0,
+            "cosine_filter_time(s)": f"{filter_time:.2f}" if self.method in ["naive_p", "cosine_only", "pref_cluster_filter", "score_p"] else "0",
             "random_filter_time(s)": f"{filter_time:.2f}" if self.method == "random" else "0",
             "cluster_filter_time(s)": f"{cluster_filter_time:.2f}" if self.method == "pref_cluster_filter" else "0",
             "llm_time(s)": f"{llm_time:.2f}",

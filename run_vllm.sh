@@ -9,6 +9,10 @@ if [ -z "$GPUS" ]; then
   exit 1
 fi
 
+# GPU 설정
+export CUDA_VISIBLE_DEVICES=$GPUS
+export VLLM_WORKER_MULTIPROC_METHOD=spawn
+
 # GPU 개수 계산
 IFS=',' read -ra GPU_ARRAY <<< "$GPUS"
 NUM_GPUS=${#GPU_ARRAY[@]}

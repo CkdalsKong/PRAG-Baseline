@@ -425,6 +425,7 @@ class MyDataUtils:
             "summarized": summarized_text,
             "reason": reason
         }
+        
     def extract_likes_dislikes(self, preference):
         prompt = f"""
 Given the following preference statement, extract the likes and dislikes in a structured format.
