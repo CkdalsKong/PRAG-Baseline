@@ -4,20 +4,21 @@ from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from mydata_utils import MyDataUtils, EVALUATION_REPORT_FILE, ERROR_TYPE_DIR
 
-class MyDataEvaluation(MyDataUtils):
+class MyDataEvaluation:
     def __init__(self, utils):
-        super().__init__(
-            mode=utils.mode,
-            method=utils.method,
-            device=utils.device,
-            use_multi_gpu=utils.use_multi_gpu,
-            chunk_mode=utils.chunk_mode,
-            output_dir=utils.output_dir,
-            persona_task_file=utils.persona_task_file,
-            emb_model_name=utils.emb_model_name
-        )
         self.utils = utils
+        self.method = utils.method
+        self.device = utils.device
+        self.use_multi_gpu = utils.use_multi_gpu
+        self.chunk_mode = utils.chunk_mode
+        self.output_dir = utils.output_dir
+        self.persona_task_file = utils.persona_task_file
         self.emb_model_name = utils.emb_model_name
+        self.doc_mode = utils.doc_mode
+        self.chunk_file = utils.chunk_file
+        self.embedding_file = utils.embedding_file
+        self.batch_size = utils.batch_size
+        self.use_trust_align = utils.use_trust_align
         
         # 임베딩 파일 경로 설정
         self.embeddings_file = os.path.join(self.output_dir, f"embeddings_{self.emb_model_name.replace('/', '_')}.npy")
@@ -43,15 +44,15 @@ class MyDataEvaluation(MyDataUtils):
         
         eval_message = [{"role": "user", "content": eval_text}]
         try:
-            eval_response = self.generate_message_vllm(eval_message, system_prompt)
+            eval_response = self.utils.generate_message_vllm(eval_message, system_prompt)
             
             result = {}
             if metric != "acknow":
-                explanation, answer = self.parse_explanation_and_answer(eval_response)
+                explanation, answer = self.utils.parse_explanation_and_answer(eval_response)
                 result["explanation"] = explanation
                 result["answer"] = answer
             else:
-                extract_preference, answer = self.parse_preference_and_answer(eval_response)
+                extract_preference, answer = self.utils.parse_preference_and_answer(eval_response)
                 result["answer"] = answer
                 result["extract_pref"] = extract_preference
             
@@ -59,8 +60,9 @@ class MyDataEvaluation(MyDataUtils):
         except Exception as e:
             print(f"⚠️ Evaluation call failed: {str(e)}")
             return None
-
-    def run_evaluation(self, persona_index, method_dir):
+    
+    def run_evaluation_with_cache(self, persona_index, method_dir, cached_resources):
+        """캐시된 리소스를 사용하는 새로운 evaluation 방식"""
         # 평가 메트릭 로드
         file_dict = {
             "acknow": "check_acknowledge.txt",
@@ -78,13 +80,50 @@ class MyDataEvaluation(MyDataUtils):
         system_prompt = "You are a helpful assistant in evaluating an AI assistant's response. You should be fair and strict and follow the user's instruction."
         
         # Generation 결과 로드
-        generation_file = os.path.join(method_dir, f"gen_{self.method}_{persona_index}.json")
-        generation_data = self.load_json(generation_file)
+        if self.utils.index_type == "flat":
+            if self.method[-2:] == "wq":
+                generation_file = os.path.join(method_dir, f"gen_wq_flat_{persona_index}.json")
+            elif self.method[-3:] == "wql":
+                generation_file = os.path.join(method_dir, f"gen_wql_flat_{persona_index}.json")
+            else:
+                generation_file = os.path.join(method_dir, f"gen_{self.method}_flat_{persona_index}.json")
+        elif self.method == "raptor":
+            generation_file = os.path.join(method_dir, f"gen_raptor_{persona_index}.json")
+        elif self.use_trust_align:
+            generation_file = os.path.join(method_dir, f"gen_{self.method}_trustalign_{persona_index}.json")
+        else:
+            if self.method[-2:] == "wq":
+                generation_file = os.path.join(method_dir, f"gen_wq_{persona_index}.json")
+            elif self.method[-3:] == "wql":
+                generation_file = os.path.join(method_dir, f"gen_wql_{persona_index}.json")
+            else:
+                generation_file = os.path.join(method_dir, f"gen_{self.method}_{persona_index}.json")
+        generation_data = self.utils.load_json(generation_file)
         
         print(f"✅ Loaded {len(generation_data)} generations from {generation_file}")
         
         # 평가 결과 저장 파일
-        save_file = os.path.join(method_dir, f"eval_{self.method}_{persona_index}.json")
+        if self.utils.index_type == "flat":
+            if self.method[-2:] == "wq":
+                save_file = os.path.join(method_dir, f"eval_wq_flat_{persona_index}.json")
+            elif self.method[-3:] == "wql":
+                save_file = os.path.join(method_dir, f"eval_wql_flat_{persona_index}.json")
+            else:
+                save_file = os.path.join(method_dir, f"eval_{self.method}_flat_{persona_index}.json")
+        elif self.method == "raptor":
+            save_file = os.path.join(method_dir, f"eval_raptor_{persona_index}.json")
+        elif self.use_trust_align:
+            save_file = os.path.join(method_dir, f"eval_{self.method}_trustalign_{persona_index}.json")
+        else:
+            if self.method[-2:] == "wq":
+                save_file = os.path.join(method_dir, f"eval_wq_{persona_index}.json")
+            elif self.method[-3:] == "wql":
+                save_file = os.path.join(method_dir, f"eval_wql_{persona_index}.json")
+            else:
+                save_file = os.path.join(method_dir, f"eval_{self.method}_{persona_index}.json")
+        
+        # 캐시된 모델 사용 (모델 로딩 생략)
+        print("✅ Using cached models for evaluation")
 
         # 평가 실행
         with ThreadPoolExecutor() as executor:
@@ -121,7 +160,7 @@ class MyDataEvaluation(MyDataUtils):
                     generation_data[task_id]["evaluation_error_analysis"][metric] = error_check
                     
                     # 중간 결과 저장
-                    self.save_json(save_file, generation_data)
+                    self.utils.save_json(save_file, generation_data)
 
         print(f"✅ Evaluation for persona {persona_index} finished. Saved to {save_file}")
 
@@ -188,7 +227,7 @@ class MyDataEvaluation(MyDataUtils):
             "preference_following_accuracy(%)": round((stats["preference_adherence_accuracy"] / len(generation_data)) * 100, 2)
         }
         
-        self.save_csv(os.path.join(self.output_dir, EVALUATION_REPORT_FILE), fieldnames, row)
+        self.utils.save_csv(os.path.join(self.output_dir, EVALUATION_REPORT_FILE), fieldnames, row)
         
         print(f"✅ Evaluation summary saved to: {os.path.join(self.output_dir, EVALUATION_REPORT_FILE)}")
         return method_dir
