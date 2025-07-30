@@ -66,7 +66,7 @@ def load_models(model_name):
         if gpu_memory >= 80e9:  # 80GB
             base_batch_size = 512
         elif gpu_memory >= 48e9:  # 48GB
-            base_batch_size = 1024
+            base_batch_size = 512
         elif gpu_memory >= 24e9:  # 24GB
             base_batch_size = 32
         elif gpu_memory >= 16e9:  # 16GB
@@ -158,8 +158,8 @@ def main():
     parser.add_argument("--root_dir", type=str, default="../data/corpus", help="청크 파일 및 출력 디렉토리 경로")
     parser.add_argument("--chunk_mode", type=str, required=True, choices=["wodoc", "wdoc"], 
                       help="Chunk mode: 'wodoc' for chunks without document info, 'wdoc' for chunks with document info")
-    parser.add_argument("--doc_mode", type=str, required=True, choices=["total", "sample", "related", "related2", "sample_sw", "total_sw"], 
-                      help="Document mode: 'total' for all documents, 'sample' for sampled documents, 'related' for sampled related documents")
+    parser.add_argument("--doc_mode", type=str, required=True, choices=["total", "sample", "related", "related2", "sample_sw", "total_sw", "baseline_sampling"], 
+                      help="Document mode: 'total' for all documents, 'sample' for sampled documents, 'related' for sampled related documents, 'baseline_sampling' for baseline sampling")
     args = parser.parse_args()
 
     # 모델 이름에서 파일명 생성
@@ -169,7 +169,13 @@ def main():
     print("Loading chunks...")
 
     # doc_mode와 chunk_mode에 따른 파일 경로 설정
-    if args.doc_mode == "total":
+    if args.doc_mode == "baseline_sampling":
+        if args.chunk_mode == "wdoc":
+            chunk_file = os.path.join(args.root_dir, "forbaseline_sampled_chunks_with_doc_sw_01.jsonl")
+        else:  # wodoc
+            print("baseline_sampling은 wdoc 모드만 지원합니다.")
+            return
+    elif args.doc_mode == "total":
         if args.chunk_mode == "wdoc":
             chunk_file = os.path.join(args.root_dir, "full_chunks_with_doc.jsonl")
         else:  # wodoc
@@ -231,7 +237,9 @@ def main():
         chunk_mode = ""
     
     # doc_mode에 따른 파일명 설정
-    if args.doc_mode == "total":
+    if args.doc_mode == "baseline_sampling":
+        output_file = os.path.join(args.root_dir, f"forbaseline01_sampled_embeddings_{chunk_mode}{model_name_clean}.npy")
+    elif args.doc_mode == "total":
         output_file = os.path.join(args.root_dir, f"full_embeddings_{chunk_mode}{model_name_clean}.npy")
     elif args.doc_mode == "related":
         output_file = os.path.join(args.root_dir, f"sampled_related_embeddings_{chunk_mode}{model_name_clean}.npy")
